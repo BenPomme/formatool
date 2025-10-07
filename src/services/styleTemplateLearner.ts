@@ -249,8 +249,21 @@ export class StyleTemplateLearner {
       }
     });
 
+    // Table rule: use extracted fonts when no table examples exist in reference
+    setRule('table', {
+      markdown: { prefix: '' },
+      spacing: { before: 1, after: 1 },
+      formatting: {},
+      special: {},
+      typography: {
+        font: generalRules.defaultFont,
+        fontSize: generalRules.defaultFontSize,
+        color: generalRules.defaultColor
+      }
+    });
+
     const defaultTypes: ElementType[] = [
-      'table', 'tableOfContents', 'footnote', 'citation', 'codeBlock',
+      'tableOfContents', 'footnote', 'citation', 'codeBlock',
       'imageCaption', 'header', 'footer'
     ];
 
