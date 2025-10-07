@@ -270,6 +270,115 @@ export interface DocumentStructure {
   };
 }
 
+export interface FormattedTextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  color?: string;
+}
+
+export interface FormattedBlock {
+  id: string;
+  elementId: string;
+  type: ElementType;
+  numbering?: string;
+  spacing?: {
+    before?: number;
+    after?: number;
+  };
+  runs: FormattedTextRun[];
+  listItems?: FormattedTextRun[][];
+  alignment?: 'left' | 'center' | 'right' | 'justify';
+  lineHeight?: number;
+  indent?: number;
+  bulletSymbol?: string;
+  numberFormat?: string;
+  typography?: {
+    font?: string;
+    fontSize?: number;
+    color?: string;
+  };
+  metadata?: Record<string, any>;
+  insights?: SemanticInsight;
+  tableData?: {
+    headers: string[];
+    rows: string[][];
+  };
+}
+
+export interface FormattedDocumentRepresentation {
+  text: string;
+  blocks: FormattedBlock[];
+  styleId: string;
+  generalDirectives?: {
+    paragraphSpacing?: number;
+    indentSize?: number;
+    lineHeight?: number;
+    baseAlignment?: 'left' | 'center' | 'right' | 'justify';
+    defaultFont?: string;
+    defaultFontSize?: number;
+    defaultColor?: string;
+    bulletSymbol?: string;
+    numberFormat?: string;
+  };
+  semanticSummary?: SemanticDocumentInsight;
+}
+
+export interface SemanticInsight {
+  role: SemanticRole;
+  confidence: number;
+  rationale?: string;
+  typography?: {
+    font?: string;
+    fontSizePt?: number;
+    weight?: 'normal' | 'bold';
+    italic?: boolean;
+    color?: string;
+  };
+  layout?: {
+    alignment?: 'left' | 'center' | 'right' | 'justify';
+    spacingBefore?: number;
+    spacingAfter?: number;
+    indent?: number;
+  };
+  contentSignals?: string[];
+  source?: 'detector' | 'style-template' | 'override';
+}
+
+export type SemanticRole =
+  | 'document-title'
+  | 'chapter-heading'
+  | 'section-heading'
+  | 'subsection-heading'
+  | 'paragraph'
+  | 'list-item'
+  | 'table'
+  | 'table-header'
+  | 'table-row'
+  | 'quote'
+  | 'code'
+  | 'footnote'
+  | 'figure-caption'
+  | 'header'
+  | 'footer'
+  | 'unknown';
+
+export interface SemanticDocumentInsight {
+  detectorVersion: string;
+  templateVersion: string;
+  generatedAt: string;
+  sourceStyleId: string;
+  summary: {
+    titles: number;
+    headings: number;
+    paragraphs: number;
+    lists: number;
+    tables: number;
+    other: number;
+  };
+  notes?: string[];
+}
+
 export interface StructuredChunk extends DocumentChunk {
   elementIds: string[];
   context: {

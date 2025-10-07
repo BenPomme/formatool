@@ -16,4 +16,17 @@ router.get('/:jobId', (req: Request, res: Response) => {
   res.json(progress);
 });
 
+router.get('/:jobId/logs', (req: Request, res: Response) => {
+  const { jobId } = req.params;
+  const logs = progressTracker.getLogs(jobId);
+
+  if (!logs) {
+    return res.status(404).json({
+      error: 'Job not found'
+    });
+  }
+
+  res.json({ logs });
+});
+
 export default router;

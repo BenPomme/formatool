@@ -1,12 +1,6 @@
-import OpenAI from 'openai';
 import { DocumentChunk, FormattingStyle } from '../types';
 import { progressTracker } from './progressTracker';
-
-const getOpenAIClient = () => {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || ''
-  });
-};
+import { getOpenAIClient, OPENAI_MODEL, OPENAI_TIMEOUT_MS } from './openaiClient';
 
 export async function formatDocument(
   chunks: DocumentChunk[],
@@ -49,7 +43,7 @@ async function formatChunk(content: string, style: FormattingStyle): Promise<str
     console.log(`  - Original word count: ${originalWordCount}`);
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-5-nano-2025-08-07',
+      model: OPENAI_MODEL,
       messages: [
         {
           role: 'system',
@@ -77,7 +71,7 @@ Remember: Return 100% of the above text with markdown formatting applied.`
         }
       ],
       temperature: 0,
-      max_completion_tokens: 32000
+      max_tokens: 8000
     });
 
     const formattedContent = response.choices[0]?.message?.content || content;

@@ -1,5 +1,38 @@
 # Document Formatter - Development Roadmap
 
+## 2025 Formatting Excellence Roadmap (Current Focus)
+
+### Objective
+Deliver human-grade, style-faithful documents across any length by combining rich typographic data, declarative style logic, and scalable processing.
+
+### Workstream A – Style Intelligence & Data Fidelity
+- [ ] Extend `docxStyleExtractor` to persist full typography (fonts, sizes, colors, spacing, numbering, justification, tables) into `StyleExtractionResult`.
+- [ ] Preserve extracted fonts through style templates, hybrid formatter, and export generators so DOCX/PDF output uses original typefaces by default.
+- [ ] Enrich `StyleTemplate` to carry extracted metadata and expose a normalized rule DSL (headings, paragraphs, lists, callouts).
+- [ ] Build automated validation comparing extracted styles with rendered output (diff typography, spacing, numbering).
+- [ ] Maintain a library of reference documents and golden outputs for regression checks.
+
+### Workstream B – Declarative Formatting Engine Refresh
+- [ ] Introduce structured formatting primitives (runs, blocks, sections) and upgrade `LocalFormattingEngine` to emit them alongside plain text.
+- [ ] Replace hard-coded heuristics with declarative rule execution (spacing, wrappers, numbering, callouts) plus small per-style plugins for bespoke behaviour.
+- [ ] Transport structured runs through `HybridFormatter` and into `docxGenerator`/PDF generator so exports map to native Word styles instead of Markdown markers.
+- [ ] Add an optional AI-polish pass for nuanced sections with strict diff checking to avoid content drift.
+
+### Workstream C – Long-Document Scalability & Token Budgeting
+- [ ] Enhance `LocalStructureDetector` to capture deep hierarchy, cross references, and semantic annotations needed for chunking.
+- [ ] Implement chapter/section aware chunk orchestration that keeps prompts under token limits while preserving context windows.
+- [ ] Cache per-style templates and section embeddings to avoid recomputing across chunks and support incremental reformatting.
+- [ ] Stream formatted sections back to the client with reconciliation logic that guarantees order and formatting integrity.
+- [ ] Add guardrails for partially processed documents (checkpointing, resumable jobs, progress UI) and automated merging/QA of chunk outputs.
+
+### Milestones (Rolling)
+- **M1 – Structured Output (Week 1-2):** Engine emits structured blocks + text; docx renderer consumes structured runs.
+- **M2 – Style Fidelity (Week 3-4):** Style extraction → rule DSL round trip validated against golden docs.
+- **M3 – Long Doc Pilot (Week 5):** Process 150-page reference smoothly with streaming UI and token-safe chunking.
+- **M4 – Human Polish (Week 6+):** AI micro-polish toggle, advanced QA checks (widow/orphan, smart quoting).
+
+> _Note_: Legacy roadmap (below) is retained for historical context but superseded by the focus areas above.
+
 ## Phase 1: Foundation Setup (Week 1)
 
 ### Day 1-2: Project Initialization

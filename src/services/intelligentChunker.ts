@@ -1,11 +1,12 @@
 import { encoding_for_model } from '@dqbd/tiktoken';
 import { DocumentElement, DocumentStructure, StructuredChunk } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { MAX_TOKENS_PER_REQUEST } from './openaiClient';
 
-// GPT-4o has 128k context window, but only supports 16384 completion tokens
-const MAX_TOKENS = parseInt(process.env.MAX_TOKENS_PER_REQUEST || '12000');
+// Smaller chunks for faster processing
+const MAX_TOKENS = MAX_TOKENS_PER_REQUEST;
 const IDEAL_CHUNK_SIZE = Math.floor(MAX_TOKENS * 0.8); // 80% of max for safety
-const MIN_CHUNK_SIZE = 1000; // Don't create tiny chunks
+const MIN_CHUNK_SIZE = 600; // Allow smaller chunks for speed
 
 let encoder: any;
 try {

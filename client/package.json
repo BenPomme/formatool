@@ -12,6 +12,7 @@
   "dependencies": {
     "@types/react-dropzone": "^4.2.2",
     "axios": "^1.12.2",
+    "lucide-react": "^0.544.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-dropzone": "^14.3.8"

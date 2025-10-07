@@ -8,6 +8,7 @@ interface JobProgress {
   error?: string;
   conformityScore?: number;
   isConformant?: boolean;
+  logs?: string[];
 }
 
 class ProgressTracker {
@@ -18,8 +19,31 @@ class ProgressTracker {
       jobId,
       status: 'pending',
       progress: 0,
-      message: 'Initializing document processing'
+      message: 'Initializing document processing',
+      logs: []
     });
+  }
+
+  log(jobId: string, message: string): void {
+    const job = this.jobs.get(jobId);
+    if (job) {
+      if (!job.logs) job.logs = [];
+      const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+      job.logs.push(`[${timestamp}] ${message}`);
+
+      // Keep last 100 logs (ring buffer)
+      if (job.logs.length > 100) {
+        job.logs.shift();
+      }
+
+      // Also log to console for server-side visibility
+      console.log(`[Job ${jobId}] ${message}`);
+    }
+  }
+
+  getLogs(jobId: string): string[] {
+    const job = this.jobs.get(jobId);
+    return job?.logs || [];
   }
 
   updateProgress(jobId: string, update: Partial<JobProgress>): void {
@@ -113,6 +137,29 @@ class ProgressTracker {
       message: 'Processing failed'
     });
     this.deleteJob(jobId);
+  }
+
+  setChecking(jobId: string): void {
+    this.updateProgress(jobId, {
+      status: 'checking',
+      progress: 90,
+      message: 'Validating content preservation'
+    });
+  }
+
+  complete(jobId: string, score: number, isConformant: boolean): void {
+    this.updateProgress(jobId, {
+      status: 'completed',
+      progress: 100,
+      conformityScore: score,
+      isConformant: isConformant,
+      message: `Document formatting completed (${score}% preserved)`
+    });
+    this.deleteJob(jobId);
+  }
+
+  fail(jobId: string, error: string): void {
+    this.setFailed(jobId, error);
   }
 }
 

@@ -1,12 +1,6 @@
-import OpenAI from 'openai';
 import { DocumentElement, DocumentStructure, ElementType } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-
-const getOpenAIClient = () => {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || ''
-  });
-};
+import { getOpenAIClient, OPENAI_MODELS, OPENAI_TIMEOUT_MS } from './openaiClient';
 
 export class DocumentAnalyzer {
   private openai: any;
@@ -82,7 +76,7 @@ IMPORTANT:
 ${content.substring(0, 50000)} ${content.length > 50000 ? '... [document continues]' : ''}`;
 
     const response = await this.openai.chat.completions.create({
-      model: 'gpt-5-nano-2025-08-07',
+      model: OPENAI_MODELS.ANALYSIS,
       messages: [
         {
           role: 'system',
@@ -94,7 +88,7 @@ ${content.substring(0, 50000)} ${content.length > 50000 ? '... [document continu
         }
       ],
       temperature: 0,
-      max_completion_tokens: 32000,
+      max_tokens: 8000,
       response_format: { type: 'json_object' }
     });
 

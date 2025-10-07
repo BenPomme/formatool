@@ -1,4 +1,4 @@
-import { encoding_for_model } from '@dqbd/tiktoken';
+import { encoding_for_model, type Tiktoken } from '@dqbd/tiktoken';
 import { DocumentChunk } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 const MAX_TOKENS = parseInt(process.env.MAX_TOKENS_PER_REQUEST || '8000');
 const OVERLAP_TOKENS = 50;
 // Use gpt-4 encoding as fallback since gpt-5-nano might not be in tiktoken yet
-let encoder;
+let encoder: Tiktoken;
 try {
   encoder = encoding_for_model('gpt-5-nano' as any);
 } catch {

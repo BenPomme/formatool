@@ -3,6 +3,9 @@ import { generateDocx } from '../services/docxGenerator';
 import { generatePdf } from '../services/pdfGenerator';
 import path from 'path';
 import fs from 'fs/promises';
+import { documentStore } from './uploadDual';
+import { StyleExtractionResult } from '../types/styleAttributes';
+import { FormattedDocumentRepresentation } from '../types';
 
 const router = Router();
 
@@ -11,6 +14,8 @@ interface ExportRequest {
   format: 'docx' | 'pdf';
   filename: string;
   styleId: string;
+  sessionId?: string;
+  structuredRepresentation?: FormattedDocumentRepresentation;
 }
 
 router.post('/', async (req: Request<{}, {}, ExportRequest>, res: Response, next: NextFunction) => {
@@ -27,10 +32,31 @@ router.post('/', async (req: Request<{}, {}, ExportRequest>, res: Response, next
     let filePath: string;
     const sanitizedFilename = filename.replace(/[^a-z0-9]/gi, '_');
 
+    let styleExtraction: StyleExtractionResult | null = null;
+
+    if (req.body.sessionId) {
+      const sessionData = documentStore.get(req.body.sessionId);
+      if (sessionData?.referenceDoc.styleAttributes) {
+        styleExtraction = sessionData.referenceDoc.styleAttributes as StyleExtractionResult;
+      }
+    }
+
     if (format === 'docx') {
-      filePath = await generateDocx(content, sanitizedFilename, styleId);
+      filePath = await generateDocx(
+        content,
+        sanitizedFilename,
+        styleId,
+        styleExtraction,
+        req.body.structuredRepresentation || null
+      );
     } else if (format === 'pdf') {
-      filePath = await generatePdf(content, sanitizedFilename, styleId);
+      filePath = await generatePdf(
+        content,
+        sanitizedFilename,
+        styleId,
+        req.body.structuredRepresentation || null,
+        styleExtraction
+      );
     } else {
       return res.status(400).json({
         success: false,

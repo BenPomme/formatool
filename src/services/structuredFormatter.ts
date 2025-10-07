@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import {
   StructuredChunk,
   FormattingStyle,
@@ -7,12 +6,8 @@ import {
   ElementType
 } from '../types';
 import { progressTracker } from './progressTracker';
-
-const getOpenAIClient = () => {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || ''
-  });
-};
+import { getOpenAIClient, OPENAI_MODEL, OPENAI_TIMEOUT_MS, FORMAT_CONCURRENCY } from './openaiClient';
+import pLimit from 'p-limit';
 
 // Element-specific formatting rules per style
 const ELEMENT_FORMATTING_RULES: Record<string, Record<ElementType, any>> = {
@@ -88,43 +83,46 @@ export class StructuredFormatter {
   ): Promise<StructuredChunk[]> {
     console.log(`🎨 Formatting ${chunks.length} chunks with structure awareness...`);
     console.log(`📝 Style being used: ${style.name} (${style.id})`);
-    const formattedChunks: StructuredChunk[] = [];
+    console.log(`⚡ Using ${FORMAT_CONCURRENCY} parallel workers`);
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
+    const limit = pLimit(FORMAT_CONCURRENCY);
 
+    const tasks = chunks.map((chunk, idx) => limit(async () => {
       if (jobId) {
-        progressTracker.setFormatting(jobId, i + 1, chunks.length);
+        progressTracker.setFormatting(jobId, idx + 1, chunks.length);
+        progressTracker.log(jobId, `Processing chunk ${chunk.order + 1}/${chunks.length}`);
       }
 
       try {
         console.log(`\n📋 Processing chunk ${chunk.order + 1}:`);
-        console.log(`  - Element IDs: ${chunk.elementIds.join(', ')}`);
-        console.log(`  - Context: ${JSON.stringify(chunk.context)}`);
         console.log(`  - Word count: ${chunk.content.split(/\s+/).length} words`);
 
         const formattedChunk = await this.formatStructuredChunk(
           chunk,
           style,
-          structure
+          structure,
+          jobId
         );
 
-        console.log(`  ✅ Chunk formatted successfully`);
-        console.log(`  - New word count: ${formattedChunk.content.split(/\s+/).length} words`);
-        console.log(`  - Content changed: ${formattedChunk.content !== chunk.content}`);
+        console.log(`  ✅ Chunk ${chunk.order + 1} formatted successfully`);
+        if (jobId) {
+          progressTracker.log(jobId, `✅ Chunk ${chunk.order + 1} completed`);
+        }
 
-        formattedChunks.push(formattedChunk);
-
-        console.log(`Formatted chunk ${chunk.order + 1}/${chunks.length}`);
+        return formattedChunk;
       } catch (error) {
         console.error(`❌ Error formatting chunk ${chunk.order}:`, error);
-        console.log(`⚠️ Returning original chunk to prevent data loss`);
-        // Return original chunk on error to prevent data loss
-        formattedChunks.push(chunk);
+        if (jobId) {
+          progressTracker.log(jobId, `⚠️ Chunk ${chunk.order + 1} failed, using fallback`);
+        }
+        // Use local formatting as fallback
+        return { ...chunk, content: this.localFormat(chunk, style, structure) };
       }
-    }
+    }));
 
-    return formattedChunks;
+    const results = await Promise.all(tasks);
+    // Sort by original order
+    return results.sort((a, b) => a.order - b.order);
   }
 
   /**
@@ -133,7 +131,8 @@ export class StructuredFormatter {
   private async formatStructuredChunk(
     chunk: StructuredChunk,
     style: FormattingStyle,
-    structure: DocumentStructure
+    structure: DocumentStructure,
+    jobId?: string
   ): Promise<StructuredChunk> {
     // Get elements in this chunk
     const chunkElements = structure.elements.filter(
@@ -152,8 +151,14 @@ export class StructuredFormatter {
     const originalWordCount = chunk.content.trim().split(/\s+/).length;
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-5-nano-2025-08-07',
+      // Create timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('OpenAI API timeout')), OPENAI_TIMEOUT_MS);
+      });
+
+      // Create API call promise (without signal parameter)
+      const apiPromise = this.openai.chat.completions.create({
+        model: OPENAI_MODEL,
         messages: [
           {
             role: 'system',
@@ -165,8 +170,12 @@ export class StructuredFormatter {
           }
         ],
         temperature: 0,
-        max_completion_tokens: 32000
+        // Smaller token limit for smaller chunks
+        max_tokens: Math.min(3000, Math.ceil((chunk.tokenCount || 1200) * 1.5))
       });
+
+      // Race between API call and timeout
+      const response = await Promise.race([apiPromise, timeoutPromise]) as any;
 
       const formattedContent = response.choices[0]?.message?.content || chunk.content;
 
@@ -185,11 +194,49 @@ export class StructuredFormatter {
         content: formattedContent
       };
     } catch (error: any) {
-      console.error('❌ OpenAI API error:', error.message);
-      console.error('Full error:', error);
-      console.log('⚠️ Returning original chunk due to API error');
-      return chunk; // Return original on error
+      if (error.message === 'OpenAI API timeout') {
+        console.error('⏱️ OpenAI API timeout after', OPENAI_TIMEOUT_MS, 'ms');
+        if (jobId) progressTracker.log(jobId, `⏱️ Timeout for chunk ${chunk.order + 1}`);
+      } else {
+        console.error('❌ OpenAI API error:', error.message);
+      }
+      // Use local formatting as fallback
+      return { ...chunk, content: this.localFormat(chunk, style, structure) };
     }
+  }
+
+  /**
+   * Local deterministic formatter for fallback
+   */
+  private localFormat(chunk: StructuredChunk, style: FormattingStyle, structure: DocumentStructure): string {
+    let formatted = chunk.content;
+
+    // Apply basic markdown formatting based on common patterns
+    formatted = formatted
+      // Headers
+      .replace(/^(Chapter|CHAPTER)\s+(\d+|[IVXLCDM]+)[:\s]*(.*)/gm, '## Chapter $2: $3')
+      .replace(/^(Section|SECTION)\s+(\d+\.\d+|\d+)[:\s]*(.*)/gm, '### Section $2: $3')
+      .replace(/^(\d+\.\d+\.\d+)\s+(.*)/gm, '#### $1 $2')
+      // Lists
+      .replace(/^\s*[-•·]\s+/gm, '- ')
+      .replace(/^\s*(\d+)\)\s+/gm, '$1. ')
+      // Bold important terms
+      .replace(/\b(IMPORTANT|NOTE|WARNING|CRITICAL|KEY):/g, '**$1:**')
+      // Code blocks
+      .replace(/```([\s\S]*?)```/g, '\n```\n$1\n```\n')
+      // Tables (simple)
+      .replace(/^\|(.+)\|$/gm, (match) => match);
+
+    // Apply style-specific rules
+    if (style.id === 'business-memo') {
+      formatted = formatted
+        .replace(/^TO:/gm, '**TO:**')
+        .replace(/^FROM:/gm, '**FROM:**')
+        .replace(/^DATE:/gm, '**DATE:**')
+        .replace(/^SUBJECT:/gm, '**SUBJECT:**');
+    }
+
+    return formatted;
   }
 
   /**
