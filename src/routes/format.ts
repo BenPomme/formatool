@@ -216,6 +216,14 @@ async function processDocument(
       const processedChunks = formatter.postProcessFormatting(formattedChunks, structure);
       formattedContent = processedChunks.map(chunk => chunk.content).join('\n\n');
 
+      // Build structured representation for frontend
+      structuredRepresentation = formatter.buildStructuredRepresentation(
+        processedChunks,
+        structure,
+        style.id
+      );
+      debugInfo.pipeline.push(`Built structured representation with ${structuredRepresentation.blocks.length} blocks`);
+
       // Phase 4: Conformity check
       progressTracker.setCheckingConformity(jobId);
 

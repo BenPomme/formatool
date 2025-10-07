@@ -3,12 +3,15 @@ import {
   FormattingStyle,
   DocumentStructure,
   DocumentElement,
-  ElementType
+  ElementType,
+  FormattedDocumentRepresentation,
+  FormattedBlock,
+  FormattedTextRun
 } from '../types';
 import { progressTracker } from './progressTracker';
 import { getOpenAIClient, OPENAI_MODEL, OPENAI_TIMEOUT_MS, FORMAT_CONCURRENCY } from './openaiClient';
 import pLimit from 'p-limit';
-import { collectTableLines, parseTableFromLines, renderMarkdownTable } from '../utils/tableUtils';
+import { collectTableLines, parseTableFromLines, renderMarkdownTable, parseTableFromText } from '../utils/tableUtils';
 
 // Element-specific formatting rules per style
 const ELEMENT_FORMATTING_RULES: Record<string, Record<ElementType, any>> = {
@@ -452,5 +455,174 @@ Style: ${style.name}`;
     }
 
     return normalized.join('\n');
+  }
+
+  /**
+   * Build structured representation from formatted chunks for frontend rendering
+   */
+  buildStructuredRepresentation(
+    chunks: StructuredChunk[],
+    structure: DocumentStructure,
+    styleId: string
+  ): FormattedDocumentRepresentation {
+    console.log('🔨 Building structured representation from chunks...');
+
+    const allBlocks: FormattedBlock[] = [];
+    const fullText = chunks.map(c => c.content).join('\n\n');
+
+    // Extract blocks from each chunk
+    chunks.forEach((chunk, chunkIdx) => {
+      const chunkElements = structure.elements.filter(e => chunk.elementIds.includes(e.id));
+
+      chunkElements.forEach((element, elemIdx) => {
+        // Try to extract the element's content from the formatted chunk
+        const elementBlocks = this.extractBlocksFromElement(
+          element,
+          chunk.content,
+          `chunk${chunkIdx}_elem${elemIdx}`
+        );
+
+        allBlocks.push(...elementBlocks);
+      });
+    });
+
+    // If we didn't extract specific blocks, create a fallback representation
+    if (allBlocks.length === 0) {
+      console.log('⚠️ No structured blocks extracted, creating fallback representation');
+      allBlocks.push(...this.createFallbackBlocks(fullText, structure));
+    }
+
+    return {
+      text: fullText,
+      blocks: allBlocks,
+      styleId,
+      generalDirectives: {
+        paragraphSpacing: 12,
+        lineHeight: 1.15,
+        baseAlignment: 'left'
+      }
+    };
+  }
+
+  /**
+   * Extract formatted blocks from an element's content
+   */
+  private extractBlocksFromElement(
+    element: DocumentElement,
+    formattedChunk: string,
+    idPrefix: string
+  ): FormattedBlock[] {
+    const blocks: FormattedBlock[] = [];
+
+    // For table elements, try to parse table data
+    if (element.type === 'table') {
+      const tableData = parseTableFromText(element.content);
+
+      if (tableData) {
+        blocks.push({
+          id: `${idPrefix}_${element.id}`,
+          elementId: element.id,
+          type: 'table',
+          runs: [{ text: element.content }],
+          tableData,
+          metadata: { rawContent: element.content }
+        });
+      }
+    }
+
+    return blocks;
+  }
+
+  /**
+   * Create fallback blocks by parsing the formatted markdown text
+   */
+  private createFallbackBlocks(
+    formattedText: string,
+    structure: DocumentStructure
+  ): FormattedBlock[] {
+    const blocks: FormattedBlock[] = [];
+    const lines = formattedText.split('\n');
+    let currentBlock: string[] = [];
+    let blockType: ElementType = 'paragraph';
+    let blockId = 0;
+
+    const flushBlock = () => {
+      if (currentBlock.length > 0) {
+        const content = currentBlock.join('\n');
+        const tableData = blockType === 'table' ? parseTableFromText(content) : undefined;
+
+        blocks.push({
+          id: `fallback_block_${blockId++}`,
+          elementId: `fallback_${blockId}`,
+          type: blockType,
+          runs: [{ text: content }],
+          tableData: tableData || undefined,
+          metadata: tableData ? { rawContent: content } : undefined
+        });
+
+        currentBlock = [];
+      }
+    };
+
+    let inTable = false;
+    let tableLines: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Detect markdown table
+      if (line.includes('|') && /\|.*\|/.test(line)) {
+        if (!inTable) {
+          flushBlock();
+          inTable = true;
+          blockType = 'table';
+        }
+        tableLines.push(line);
+      } else if (inTable && line.trim() === '') {
+        // End of table
+        currentBlock = tableLines;
+        flushBlock();
+        inTable = false;
+        tableLines = [];
+        blockType = 'paragraph';
+      } else if (!inTable) {
+        // Check for headers
+        if (line.startsWith('# ')) {
+          flushBlock();
+          blockType = 'title';
+          currentBlock.push(line.replace(/^#\s+/, ''));
+          flushBlock();
+          blockType = 'paragraph';
+        } else if (line.startsWith('## ')) {
+          flushBlock();
+          blockType = 'chapter';
+          currentBlock.push(line.replace(/^##\s+/, ''));
+          flushBlock();
+          blockType = 'paragraph';
+        } else if (line.startsWith('### ')) {
+          flushBlock();
+          blockType = 'section';
+          currentBlock.push(line.replace(/^###\s+/, ''));
+          flushBlock();
+          blockType = 'paragraph';
+        } else if (line.trim() === '') {
+          flushBlock();
+        } else {
+          currentBlock.push(line);
+        }
+      }
+    }
+
+    // Flush any remaining table
+    if (inTable && tableLines.length > 0) {
+      currentBlock = tableLines;
+      blockType = 'table';
+    }
+
+    flushBlock();
+
+    console.log(`✅ Created ${blocks.length} fallback blocks (${blocks.filter(b => b.type === 'table').length} tables)`);
+
+    return blocks;
   }
 }
