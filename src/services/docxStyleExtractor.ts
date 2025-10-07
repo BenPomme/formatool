@@ -121,6 +121,25 @@ export class DocxStyleExtractor {
       console.error('Error extracting DOCX styles:', error);
     }
 
+    // Fallback: If no default font was detected, use the first usable font from the font list
+    if (!styles.defaultFont && styles.fonts.size > 0) {
+      // Exclude symbol fonts and prefer common document fonts
+      const fontArray = Array.from(styles.fonts);
+      const preferredFont = fontArray.find(font =>
+        !font.includes('Symbol') &&
+        !font.includes('Wingdings') &&
+        !font.includes('Webdings') &&
+        !font.includes('MS Mincho') &&
+        !font.includes('MS Gothic') &&
+        !font.includes('Courier New')
+      ) || fontArray[0];
+
+      if (preferredFont) {
+        styles.defaultFont = preferredFont;
+        console.log(`📝 Set default font from font list: ${preferredFont}`);
+      }
+    }
+
     return styles;
   }
 
