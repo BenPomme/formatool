@@ -566,25 +566,42 @@ Style: ${style.name}`;
 
     let inTable = false;
     let tableLines: string[] = [];
+    let potentialTableStart = -1;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // Detect markdown table
-      if (line.includes('|') && /\|.*\|/.test(line)) {
+      // Detect markdown table or space-separated table
+      const looksLikeTable = (line.includes('|') && /\|.*\|/.test(line)) ||
+                            /\s{3,}/.test(line) || /\t/.test(line);
+
+      if (looksLikeTable) {
         if (!inTable) {
           flushBlock();
           inTable = true;
           blockType = 'table';
+          potentialTableStart = i;
         }
         tableLines.push(line);
-      } else if (inTable && line.trim() === '') {
-        // End of table
-        currentBlock = tableLines;
-        flushBlock();
-        inTable = false;
-        tableLines = [];
-        blockType = 'paragraph';
+      } else if (inTable) {
+        // Check if this is a table title or continuation
+        if (line.trim() === '') {
+          // Empty line ends table
+          currentBlock = tableLines;
+          flushBlock();
+          inTable = false;
+          tableLines = [];
+          potentialTableStart = -1;
+          blockType = 'paragraph';
+        } else if (line.match(/^Table \d+\./i) || line.match(/^Figure \d+\./i)) {
+          // This is a table/figure title, include it with the table
+          tableLines.unshift(line);
+        } else {
+          // Possible continuation of previous row
+          if (tableLines.length > 0) {
+            tableLines[tableLines.length - 1] += '\n' + line;
+          }
+        }
       } else if (!inTable) {
         // Check for headers
         if (line.startsWith('# ')) {
