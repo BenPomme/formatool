@@ -85,3 +85,24 @@ return {
 ## Conclusion
 
 The font detection is still not working despite the user's fixes. The core issue is that `rawDocxStyles` is not being included in the API response, preventing the frontend from displaying the actual extracted fonts. The system falls back to showing "Calibri" as a default value instead of the real fonts from the document.
+
+---
+
+## Table Detection & Formatting Status (2025-01-29)
+
+### Completed Work
+- Replaced the brittle, ad‑hoc table parsing inside `localFormattingEngine`, `semanticPostProcessor`, and `structuredFormatter` with a shared helper (`src/utils/tableUtils.ts`).  
+- Local structure detection now groups tab- and space-aligned rows into a single `table` element instead of misclassifying them as headings or paragraphs.  
+- Local formatting converts detected tables to Markdown pipe syntax so the structured preview can render grid lines.  
+- DOCX export transforms any detected table into a real `docx.Table` with borders, alternating row shading, and cell padding; the exported file finally shows visual table borders.  
+- Semantic post-processing uses the shared parser to populate `tableData`, ensuring previews and downloads stay in sync even when the AI returns flattened text.
+
+### Outstanding Issues / Follow-up
+- The Markdown preview still renders via HTML markup; confirm that the new grid styling meets UX expectations once the frontend rebuilds.  
+- The AI-only pipeline (without hybrid mode) still relies on OpenAI output fidelity—run an end-to-end test to verify tables survive the round trip.  
+- No automated regression exists yet. Plan to add a Jest test that feeds the `tableUtils.parseTableFromText` sample and asserts column integrity, plus a formatter snapshot to guard against future regressions.
+
+### Next Steps
+1. Draft the Jest regression test described above.  
+2. Smoke-test the `/export` DOCX route with multiple tables to validate border sizing and alignment.  
+3. Coordinate with the frontend team to double-check how Markdown tables are rendered in the app’s preview pane.*** End Patch

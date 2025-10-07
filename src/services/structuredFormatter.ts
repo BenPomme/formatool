@@ -8,6 +8,7 @@ import {
 import { progressTracker } from './progressTracker';
 import { getOpenAIClient, OPENAI_MODEL, OPENAI_TIMEOUT_MS, FORMAT_CONCURRENCY } from './openaiClient';
 import pLimit from 'p-limit';
+import { collectTableLines, parseTableFromLines, renderMarkdownTable } from '../utils/tableUtils';
 
 // Element-specific formatting rules per style
 const ELEMENT_FORMATTING_RULES: Record<string, Record<ElementType, any>> = {
@@ -403,6 +404,8 @@ Style: ${style.name}`;
           }
         }
       }
+
+      chunk.content = this.normalizeTables(chunk.content);
     });
 
     return chunks;
@@ -422,5 +425,32 @@ Style: ${style.name}`;
     }
 
     return current;
+  }
+
+  private normalizeTables(content: string): string {
+    if (!content || (!content.includes('\t') && !content.includes('  '))) {
+      return content;
+    }
+
+    const lines = content.split('\n');
+    const normalized: string[] = [];
+    let index = 0;
+
+    while (index < lines.length) {
+      const tableBlock = collectTableLines(lines, index);
+      if (tableBlock && tableBlock.lines.length >= 2) {
+        const parsed = parseTableFromLines(tableBlock.lines);
+        if (parsed) {
+          normalized.push(renderMarkdownTable(parsed));
+          index = tableBlock.endIndex + 1;
+          continue;
+        }
+      }
+
+      normalized.push(lines[index]);
+      index += 1;
+    }
+
+    return normalized.join('\n');
   }
 }

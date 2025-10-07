@@ -7,6 +7,7 @@ import {
   FormattedTextRun
 } from '../types';
 import { parseRichTextSegments } from '../utils/richText';
+import { parseTableFromText, renderMarkdownTable } from '../utils/tableUtils';
 import { StyleTemplate } from './styleTemplateLearner';
 
 const STYLE_ACCENT_COLORS: Record<string, string> = {
@@ -216,16 +217,20 @@ export class LocalFormattingEngine {
       }
 
       case 'table':
-        // Ensure proper table formatting
-        const tableLines = content.split('\n');
-        if (tableLines.length > 1 && !tableLines[1].includes('---')) {
-          // Add header separator if missing
-          const firstRow = tableLines[0];
-          const columnCount = (firstRow.match(/\|/g) || []).length - 1;
-          if (columnCount > 0) {
-            const separator = '|' + ' --- |'.repeat(columnCount);
-            tableLines.splice(1, 0, separator);
-            content = tableLines.join('\n');
+        const originalTableData = parseTableFromText(element.content);
+        if (originalTableData && !this.isMarkdownTable(content)) {
+          content = renderMarkdownTable(originalTableData);
+        } else {
+          // Ensure proper formatting if already markdown-style
+          const tableLines = content.split('\n');
+          if (tableLines.length > 1 && !tableLines[1].includes('---')) {
+            const firstRow = tableLines[0];
+            const columnCount = (firstRow.match(/\|/g) || []).length - 1;
+            if (columnCount > 0) {
+              const separator = '|' + ' --- |'.repeat(columnCount);
+              tableLines.splice(1, 0, separator);
+              content = tableLines.join('\n');
+            }
           }
         }
         break;
@@ -319,6 +324,15 @@ export class LocalFormattingEngine {
     );
     metadata.insight = semanticInsight;
 
+    let tableData: { headers: string[]; rows: string[][] } | undefined;
+    if (element.type === 'table') {
+      const parsedTable = parseTableFromText(element.content);
+      if (parsedTable) {
+        tableData = parsedTable;
+        metadata.tableData = parsedTable;
+      }
+    }
+
     return {
       id: `${element.id}-formatted`,
       elementId: element.id,
@@ -340,7 +354,8 @@ export class LocalFormattingEngine {
       runs,
       listItems,
       metadata,
-      insights: semanticInsight
+      insights: semanticInsight,
+      tableData
     };
   }
 
@@ -358,6 +373,15 @@ export class LocalFormattingEngine {
       italic: segment.italic || undefined,
       color: segment.color
     }));
+  }
+
+  private isMarkdownTable(content: string): boolean {
+    if (!content) return false;
+    const lines = content.split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length < 2) return false;
+    const header = lines[0];
+    const separator = lines[1];
+    return /\|/.test(header) && /\|?\s*:?-{3,}/.test(separator);
   }
 
   private resolveTypography(

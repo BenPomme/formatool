@@ -114,3 +114,45 @@ private createSimplifiedAttributes(full: StyleAttributes): SimplifiedStyleAttrib
 
 ## Priority
 **High** - This is a core feature of the document formatting system that directly impacts user experience and trust in the application's capability to accurately extract and apply document styles.
+
+---
+
+# Bug Report: Tables Render as Plain Text in Structured Preview
+
+## Issue Summary
+Tables detected in DOCX uploads are now parsed on the backend, but the web preview still shows them as tab-delimited paragraphs without visible borders. End users never see a grid despite the server generating full table metadata.
+
+## Environment
+- **Mode**: `/api/format` running in OpenAI (non-hybrid) mode
+- **Frontend**: Vite React app (`client/`) @ current main
+- **Backend**: Node.js (TypeScript) service with recent table-utils refactor
+
+## Reproduction Steps
+1. Start backend (`npm run dev`) and frontend (`npm run dev --prefix client`).
+2. Trigger `/api/format` with a DOCX containing a tabular comparison (e.g., "Table 1. Evaluation Summary…").
+3. Open the “Formatted Output Preview” in the UI.
+4. Observe that the supposed table appears as lines with tabs/spacing, no borders.
+
+## Expected Behavior
+- Structured preview should render an HTML `<table>` with the `.preview-table` styles (borders, alternating rows).
+- Downloaded DOCX should also reflect the grid (this now works).
+
+## Actual Behavior
+- Preview pane displays raw text; no `<table>` markup is emitted.
+- `block.type` arrives as `paragraph` for the table chunk in OpenAI mode, so `DocumentActions.renderBlock` never calls `renderTable`.
+
+## Technical Notes
+- Hybrid formatter path sets `tableData` via `parseTableFromText`, but the OpenAI/StructuredFormatter path still emits flattened text without the metadata.
+- Even after the shared `tableUtils` refactor, `StructuredFormatter.postProcessFormatting` only converts markdown strings; it does not patch the `structuredRepresentation` that the frontend consumes.
+- The frontend relies on `structured.blocks[*].tableData` to branch into `renderTable`; missing metadata is why borders never appear.
+
+## Suspected Root Cause
+`StructuredFormatter` builds markdown strings but does not surface the parsed table summary back to the client response (`job_X` global, `/routes/format.ts`). The response `structuredRepresentation` is undefined in OpenAI mode, so the client falls back to raw markdown without table cues.
+
+## Proposed Fix
+1. Extend `StructuredFormatter` to emit a lightweight representation (e.g., `extractTablesFromContent(chunk.content)`) and return it alongside the formatted text.
+2. Update `/routes/format.ts` to forward this structured context to the client, mirroring the hybrid pipeline’s `structuredRepresentation`.
+3. Add a Jest regression test that runs a format job in OpenAI mode and asserts that the response includes at least one block with `type === 'table'`.
+
+## Priority
+**Medium-High** – The backend now preserves tables, but users still see them as text in the core UI. Needs follow-up to complete the end-to-end table experience.*** End Patch

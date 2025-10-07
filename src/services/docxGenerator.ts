@@ -5,7 +5,13 @@ import {
   HeadingLevel,
   AlignmentType,
   Packer,
-  NumberFormat
+  NumberFormat,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  BorderStyle,
+  VerticalAlign
 } from 'docx';
 import fs from 'fs/promises';
 import path from 'path';
@@ -13,6 +19,7 @@ import { StyleExtractionResult } from '../types/styleAttributes';
 import { FormattedDocumentRepresentation, FormattedBlock, FormattedTextRun, ElementType } from '../types';
 import { parseRichTextSegments } from '../utils/richText';
 import { normalizeBulletSymbol } from '../utils/styleNormalization';
+import { parseTableFromText } from '../utils/tableUtils';
 
 // Simple base style configurations (font size values are docx half-points)
 const STYLE_CONFIGS: Record<string, { font: string; fontSize: number; color?: string }> = {
@@ -37,6 +44,8 @@ interface ResolvedStyleConfig {
 }
 
 type HeadingLevelValue = (typeof HeadingLevel)[keyof typeof HeadingLevel];
+type AlignmentValue = (typeof AlignmentType)[keyof typeof AlignmentType];
+type WidthValue = (typeof WidthType)[keyof typeof WidthType];
 
 export async function generateDocx(
   content: string,
@@ -76,8 +85,8 @@ export async function generateDocx(
     }
   }
 
-  const paragraphs = structured?.blocks?.length
-    ? buildParagraphsFromStructured(structured, styleConfig, styleExtraction)
+  const docChildren = structured?.blocks?.length
+    ? buildNodesFromStructured(structured, styleConfig, styleExtraction)
     : parseContentToParagraphs(content, styleId, styleConfig, styleExtraction);
 
   const numberingConfig = buildNumberingConfig(styleConfig, structured);
@@ -96,7 +105,7 @@ export async function generateDocx(
           }
         }
       },
-      children: paragraphs
+      children: docChildren
     }],
     styles: {
       default: {
@@ -288,32 +297,34 @@ function parseContentToParagraphs(
   return paragraphs;
 }
 
-function buildParagraphsFromStructured(
+type DocChild = Paragraph | Table;
+
+function buildNodesFromStructured(
   structured: FormattedDocumentRepresentation,
   styleConfig: ResolvedStyleConfig,
   styleExtraction?: StyleExtractionResult | null
-): Paragraph[] {
+): DocChild[] {
   const directives = structured.generalDirectives;
-  const paragraphs: Paragraph[] = [];
+  const nodes: DocChild[] = [];
 
   structured.blocks.forEach(block => {
-    const blockParagraphs = convertBlockToParagraphs(block, directives, styleConfig);
-    paragraphs.push(...blockParagraphs);
+    const blockNodes = convertBlockToNodes(block, directives, styleConfig);
+    nodes.push(...blockNodes);
   });
 
-  if (!paragraphs.length) {
+  if (!nodes.length) {
     return parseContentToParagraphs(structured.text, structured.styleId, styleConfig, styleExtraction);
   }
 
-  return paragraphs;
+  return nodes;
 }
 
-function convertBlockToParagraphs(
+function convertBlockToNodes(
   block: FormattedBlock,
   directives: FormattedDocumentRepresentation['generalDirectives'] | undefined,
   styleConfig: ResolvedStyleConfig
-): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
+): DocChild[] {
+  const nodes: DocChild[] = [];
   const spacing = buildParagraphSpacing(block, directives);
   const alignment = mapAlignment(block.alignment, directives?.baseAlignment);
   const indent = buildIndentProps(block);
@@ -348,12 +359,12 @@ function convertBlockToParagraphs(
       if (!children.length) {
         children.push(new TextRun({ text: '' }));
       }
-      paragraphs.push(new Paragraph(applySpacing({
+      nodes.push(new Paragraph(applySpacing({
         children,
         numbering: { reference: 'bullet-numbering', level: 0 }
       })));
     });
-    return paragraphs;
+    return nodes;
   }
 
   if (block.type === 'numberedList' && block.listItems?.length) {
@@ -363,7 +374,7 @@ function convertBlockToParagraphs(
       if (!children.length) {
         children.push(new TextRun({ text: '' }));
       }
-      paragraphs.push(new Paragraph(applySpacing({
+      nodes.push(new Paragraph(applySpacing({
         children,
         numbering: {
           reference: numberingRef,
@@ -371,14 +382,160 @@ function convertBlockToParagraphs(
         }
       })));
     });
-    return paragraphs;
+    return nodes;
+  }
+
+  if (block.type === 'table') {
+    const tableNodes = createTableFromBlock(block, spacing, alignment, resolvedTypography);
+    if (tableNodes.length) {
+      nodes.push(...tableNodes);
+      return nodes;
+    }
   }
 
   const headingLevel = resolveHeadingLevel(block.type);
-  paragraphs.push(createParagraphWithRuns(block.runs, headingLevel ? { heading: headingLevel } : undefined));
-  return paragraphs;
+  nodes.push(createParagraphWithRuns(block.runs, headingLevel ? { heading: headingLevel } : undefined));
+  return nodes;
 }
 
+function createTableFromBlock(
+  block: FormattedBlock,
+  spacing: ReturnType<typeof buildParagraphSpacing>,
+  alignment: AlignmentValue,
+  typography: { font: string; size: number; color: string }
+): DocChild[] {
+  const tableData = block.tableData
+    || parseTableFromText(
+      (block.metadata?.rawContent as string | undefined)
+        || (block.runs?.map(run => run.text).join('\n'))
+        || ''
+    );
+
+  if (!tableData) {
+    return [];
+  }
+
+  const margins = buildTableMargins(spacing, block.indent);
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: tableData.headers.map(header =>
+      createTableCell(header, typography, {
+        bold: true,
+        shading: 'E7ECFF',
+        borderSize: 4
+      })
+    )
+  });
+
+  const bodyRows = tableData.rows.map((row, index) =>
+    new TableRow({
+      children: row.map(cell =>
+        createTableCell(cell, typography, {
+          shading: index % 2 === 0 ? undefined : 'F6F8FF',
+          borderSize: 3
+        })
+      )
+    })
+  );
+
+  const tableBorders = buildTableBorders();
+  const table = new Table({
+    alignment,
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: tableBorders,
+    margins,
+    rows: [headerRow, ...bodyRows]
+  });
+
+  return [table];
+}
+
+function buildTableMargins(
+  spacing: ReturnType<typeof buildParagraphSpacing>,
+  indent?: number
+) {
+  const margins: { marginUnitType: WidthValue; top?: number; bottom?: number; left?: number; right?: number } = {
+    marginUnitType: WidthType.DXA
+  };
+
+  if (spacing?.before) {
+    margins.top = spacing.before;
+  }
+
+  if (spacing?.after) {
+    margins.bottom = spacing.after;
+  }
+
+  if (indent && indent > 0) {
+    const twips = Math.max(Math.round(indent * 40), 0);
+    margins.left = twips;
+    margins.right = twips;
+  }
+
+  if (margins.top || margins.bottom || margins.left || margins.right) {
+    return margins;
+  }
+
+  return undefined;
+}
+
+function buildTableBorders() {
+  const outer = { style: BorderStyle.SINGLE, size: 6, color: '94A3B8' };
+  const inner = { style: BorderStyle.SINGLE, size: 4, color: 'C7D2FE' };
+  return {
+    top: outer,
+    bottom: outer,
+    left: outer,
+    right: outer,
+    insideHorizontal: inner,
+    insideVertical: inner
+  };
+}
+
+function createTableCell(
+  text: string,
+  typography: { font: string; size: number; color: string },
+  options?: { bold?: boolean; shading?: string; borderSize?: number }
+): TableCell {
+  const lines = text.split(/\r?\n/).filter(line => line.length > 0);
+  const paragraphs = (lines.length ? lines : [''])
+    .map((line, index, arr) => new Paragraph({
+      children: [
+        new TextRun({
+          text: line,
+          bold: options?.bold || false,
+          font: typography.font,
+          size: typography.size,
+          color: typography.color
+        })
+      ],
+      spacing: arr.length > 1 && index < arr.length - 1 ? { after: 80 } : undefined
+    }));
+
+  const borderSize = options?.borderSize ?? 4;
+  const border = { style: BorderStyle.SINGLE, size: borderSize, color: '94A3B8' };
+
+  return new TableCell({
+    children: paragraphs,
+    verticalAlign: VerticalAlign.CENTER,
+    margins: {
+      marginUnitType: WidthType.DXA,
+      top: 80,
+      bottom: 80,
+      left: 120,
+      right: 120
+    },
+    shading: options?.shading
+      ? { fill: options.shading, color: 'auto', type: 'clear' }
+      : undefined,
+    borders: {
+      top: border,
+      bottom: border,
+      left: border,
+      right: border
+    }
+  });
+}
 function resolveBlockTypography(
   block: FormattedBlock,
   styleConfig: ResolvedStyleConfig,
